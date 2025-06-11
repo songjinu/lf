@@ -1,0 +1,29 @@
+[project]
+name = "mcp_service"
+version = "0.1.0"
+description = "MCP service for reporting and emailing tools"
+authors = [{ name = "AI Agent", email = "ai@example.com" }]
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.20.0",
+    "langchain>=0.1.0",
+    "fastmcp>=0.0.1",  # Assuming a version, will resolve during install
+    "sse-starlette>=1.0.0",
+    "pydantic>=2.0.0"
+]
+requires-python = ">=3.9"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.rye]
+managed = true # Assuming Rye for uv environment management, if not, uv will handle it
+dev-dependencies = [
+    "pytest>=7.0.0",
+    "httpx>=0.25.0"
+]
+
+[tool.uv]
+# This section might be needed if uv has specific configuration options
+# For now, we assume default behavior or rye integration handles it.
