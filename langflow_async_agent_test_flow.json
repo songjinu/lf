@@ -1,0 +1,262 @@
+{
+  "name": "Async Agent Test Flow",
+  "description": "A flow to test an agent with asynchronous tools (News, Email, Wait).",
+  "data": {
+    "nodes": [
+      {
+        "id": "ChatInput_1",
+        "data": {
+          "node": {
+            "template": {
+              "input_value": { "value": "", "type": "str", "show": true, "name": "input_value", "display_name": "Input Value" },
+              "sender": { "value": "User", "type": "str", "show": true, "name": "sender", "display_name": "Sender" },
+              "sender_name": { "value": "User", "type": "str", "show": true, "name": "sender_name", "display_name": "Sender Name" },
+              "session_id": { "value": "", "type": "str", "advanced": true, "show": true, "name": "session_id", "display_name": "Session ID" },
+              "files": { "value": [], "type": "list", "advanced": true, "show": true, "name": "files", "display_name": "Files" }
+            },
+            "display_name": "Chat Input",
+            "name": "ChatInput",
+            "description": "Input component for chat interactions.",
+            "beta": false,
+            "icon": "ChatInput",
+            "type": "ChatInput"
+          },
+          "inputs": {},
+          "outputs": [
+            { "name": "message", "id": "ChatInput_1/message", "type": "ChatMessage", "display_name": "Message", "value": "ChatInput_1/message" }
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 50, "y": 250 },
+        "width": 300,
+        "height": 318
+      },
+      {
+        "id": "OpenAIModel_1",
+        "data": {
+          "node": {
+            "template": {
+              "model_name": { "value": "gpt-4o-mini", "type": "str", "show": true, "name": "model_name", "display_name": "Model Name" },
+              "temperature": { "value": 0.1, "type": "float", "show": true, "name": "temperature", "display_name": "Temperature" },
+              "max_tokens": { "value": 4096, "type": "int", "advanced": true, "show": true, "name": "max_tokens", "display_name": "Max Tokens" },
+              "openai_api_key": { "value": null, "type": "str", "required": true, "show": true, "password": true, "name": "openai_api_key", "display_name": "OpenAI API Key", "placeholder": "sk-...", "advanced": false}
+            },
+            "display_name": "OpenAI Model",
+            "name": "OpenAIModel",
+            "description": "LLM using OpenAI API.",
+            "beta": false,
+            "icon": "OpenAI",
+            "type": "OpenAIModel"
+          },
+          "inputs": {},
+          "outputs": [
+            { "name": "output", "id": "OpenAIModel_1/output", "type": "LanguageModel", "display_name": "LanguageModel", "value": "OpenAIModel_1/output" }
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 50, "y": 600 },
+        "width": 300,
+        "height": 334
+      },
+      {
+        "id": "NewsSearchTool_1",
+        "data": {
+          "node": {
+            "template": {
+              "query": {"type": "str", "required": true, "placeholder": "", "list": false, "show": true, "multiline": false, "value": "", "name": "query", "display_name": "Search Query"},
+              "callback_url": {"type": "str", "required": false, "placeholder": "", "list": false, "show": true, "multiline": false, "value": "", "advanced": true, "name": "callback_url", "display_name": "Callback URL (Optional)"}
+            },
+            "display_name": "News Search Tool (Async)",
+            "name": "NewsSearchTool",
+            "description": "A tool that simulates searching for news and returns a task_id. Results are delivered via callback.",
+            "beta": false,
+            "icon": "FileSearch",
+            "type": "NewsSearchTool"
+          },
+          "inputs": {},
+          "outputs": [
+            { "name": "tool", "id": "NewsSearchTool_1/tool", "type": "Tool", "display_name": "Tool", "value":"NewsSearchTool_1/tool" }
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 400, "y": -50 },
+        "width": 300,
+        "height": 218
+      },
+      {
+        "id": "EmailSenderTool_1",
+        "data": {
+          "node": {
+            "template": {
+              "content": {"type": "str", "required": true, "placeholder": "", "list": false, "show": true, "multiline": true, "value": "", "name": "content", "display_name": "Email Content"},
+              "recipient": {"type": "str", "required": true, "placeholder": "", "list": false, "show": true, "multiline": false, "value": "", "name": "recipient", "display_name": "Recipient Email"},
+              "callback_url": {"type": "str", "required": false, "placeholder": "", "list": false, "show": true, "multiline": false, "value": "", "advanced": true, "name": "callback_url", "display_name": "Callback URL (Optional)"}
+            },
+            "display_name": "Email Sender Tool (Async)",
+            "name": "EmailSenderTool",
+            "description": "A tool that simulates sending an email and returns a task_id. Status is delivered via callback.",
+            "beta": false,
+            "icon": "Mail",
+            "type": "EmailSenderTool"
+          },
+          "inputs": {},
+          "outputs": [
+            { "name": "tool", "id": "EmailSenderTool_1/tool", "type": "Tool", "display_name": "Tool", "value": "EmailSenderTool_1/tool" }
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 400, "y": 200 },
+        "width": 300,
+        "height": 266
+      },
+      {
+        "id": "WaitForTaskResultTool_1",
+        "data": {
+          "node": {
+            "template": {
+              "task_id_message": {"type": "str", "required": true, "placeholder": "", "list": false, "show": true, "multiline": false, "value": "", "name": "task_id_message", "display_name": "Task ID Message"},
+              "timeout_seconds": {"type": "int", "required": false, "show": true, "value": 30, "advanced": true, "name": "timeout_seconds", "display_name": "Timeout (seconds)"},
+              "poll_interval": {"type": "float", "required": false, "show": true, "value": 0.5, "advanced": true, "name": "poll_interval", "display_name": "Poll Interval (seconds)"}
+            },
+            "display_name": "Wait For Task Result",
+            "name": "WaitForTaskResultTool",
+            "description": "Polls a shared store for the result of an asynchronous task identified by a task_id.",
+            "beta": false,
+            "icon": "Clock",
+            "type": "WaitForTaskResultTool"
+          },
+          "inputs": {},
+          "outputs": [
+            { "name": "tool", "id": "WaitForTaskResultTool_1/tool", "type": "Tool", "display_name": "Tool", "value": "WaitForTaskResultTool_1/tool" }
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 400, "y": 500 },
+        "width": 300,
+        "height": 266
+      },
+      {
+        "id": "ToolCallingAgent_1",
+        "data": {
+          "node": {
+            "template": {
+              "llm": {"type": "LanguageModel", "required": true, "show": true, "name": "llm", "display_name": "LLM"},
+              "tools": {"type": "Tool", "required": true, "show": true, "is_list": true, "name": "tools", "display_name": "Tools"},
+              "input_value": {"type": "ChatMessage", "required": true, "show": true, "name": "input_value", "display_name": "Input"},
+              "system_prompt": {
+                "type": "str",
+                "show": true,
+                "value": "You are a helpful assistant that can search for news and send emails.\nSome tools you use are asynchronous: NewsSearchTool and EmailSenderTool.\nWhen you use NewsSearchTool or EmailSenderTool, they will return a message like 'Task [TASK_ID] initiated...'. This is NOT the final result.\nAfter receiving such a message, you MUST immediately use the 'WaitForTaskResultTool' with the exact message you received (or just the TASK_ID from it) to get the actual result of the original tool.\nOnly after WaitForTaskResultTool gives you the actual data (like news articles or email status) can you use that data for other steps or to formulate your final answer.\nIf you need to search for news and then email it, you must follow this sequence:\n1. Use NewsSearchTool.\n2. Use WaitForTaskResultTool with the message (or TASK_ID) from NewsSearchTool.\n3. Use EmailSenderTool with the news result from WaitForTaskResultTool.\n4. Use WaitForTaskResultTool with the message (or TASK_ID) from EmailSenderTool to confirm email status.\nDo not try to pass the 'Task [TASK_ID] initiated...' message as data to other tools like EmailSenderTool. Always wait for the actual result.",
+                "name": "system_prompt",
+                "display_name": "System Prompt",
+                "multiline": True
+              },
+              "user_prompt": { "type": "str", "show": true, "value": "{input_value}", "name": "user_prompt", "display_name": "User Prompt"},
+              "chat_history": {"type": "Data", "required": false, "show": true, "is_list": true, "advanced": true, "name": "chat_history", "display_name": "Chat History"},
+              "handle_parsing_errors": {"type": "bool", "required": false, "show": true, "value": true, "advanced": true, "name": "handle_parsing_errors", "display_name": "Handle Parsing Errors"},
+              "verbose": {"type": "bool", "required": false, "show": true, "value": true, "advanced": true, "name": "verbose", "display_name": "Verbose"},
+              "max_iterations": {"type": "int", "required": false, "show": true, "value": 15, "advanced": true, "name": "max_iterations", "display_name": "Max Iterations"}
+            },
+            "display_name": "Async Test Agent",
+            "name": "ToolCallingAgent",
+            "description": "Agent that uses tools, configured for async tool handling.",
+            "beta": true,
+            "icon": "LangChain",
+            "type": "ToolCallingAgent"
+          },
+          "inputs": {
+            "llm": {"name": "llm", "id": "OpenAIModel_1/output", "type": "LanguageModel", "value": "OpenAIModel_1/output"},
+            "tools": [
+              {"name": "tools", "id": "NewsSearchTool_1/tool", "type": "Tool", "value": "NewsSearchTool_1/tool"},
+              {"name": "tools", "id": "EmailSenderTool_1/tool", "type": "Tool", "value": "EmailSenderTool_1/tool"},
+              {"name": "tools", "id": "WaitForTaskResultTool_1/tool", "type": "Tool", "value": "WaitForTaskResultTool_1/tool"}
+            ],
+            "input_value": {"name": "input_value", "id": "ChatInput_1/message", "type": "ChatMessage", "value": "ChatInput_1/message"}
+          },
+          "outputs": [
+            { "name": "agent", "id": "ToolCallingAgent_1/agent", "type": "AgentExecutor", "display_name": "Agent Executor", "value": "ToolCallingAgent_1/agent"},
+            { "name": "response", "id": "ToolCallingAgent_1/response", "type": "ChatMessage", "display_name": "Response", "value": "ToolCallingAgent_1/response"}
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 750, "y": 250 },
+        "width": 300,
+        "height": 650
+      },
+      {
+        "id": "ChatOutput_1",
+        "data": {
+          "node": {
+            "template": {
+              "input_value": { "type": "ChatMessage", "required": true, "show": true, "name": "input_value", "display_name": "Input Value"},
+              "sender": { "value": "AI", "type": "str", "show": true, "name": "sender", "display_name": "Sender" },
+              "sender_name": { "value": "Async Agent", "type": "str", "show": true, "name": "sender_name", "display_name": "Sender Name" },
+              "session_id": { "value": "", "type": "str", "advanced": true, "show": true, "name": "session_id", "display_name": "Session ID" },
+              "data_triggers": { "type": "Data", "required": false, "show": true, "is_list": true, "value": "", "advanced": true, "name": "data_triggers", "display_name": "Data Triggers"}
+            },
+            "display_name": "Chat Output",
+            "name": "ChatOutput",
+            "description": "Output component for chat interactions.",
+            "beta": false,
+            "icon": "ChatOutput",
+            "type": "ChatOutput"
+          },
+          "inputs": {
+             "input_value": {"name": "input_value", "id": "ToolCallingAgent_1/response", "type": "ChatMessage", "value": "ToolCallingAgent_1/response"}
+          },
+          "outputs": []
+        },
+        "type": "genericNode",
+        "position": { "x": 1100, "y": 250 },
+        "width": 300,
+        "height": 334
+      }
+    ],
+    "edges": [
+      {
+        "source": "ChatInput_1",
+        "sourceHandle": "ChatInput_1/message",
+        "target": "ToolCallingAgent_1",
+        "targetHandle": "ToolCallingAgent_1/input_value",
+        "id": "edge_ChatInput_1_message_to_ToolCallingAgent_1_input_value"
+      },
+      {
+        "source": "OpenAIModel_1",
+        "sourceHandle": "OpenAIModel_1/output",
+        "target": "ToolCallingAgent_1",
+        "targetHandle": "ToolCallingAgent_1/llm",
+        "id": "edge_OpenAIModel_1_output_to_ToolCallingAgent_1_llm"
+      },
+      {
+        "source": "NewsSearchTool_1",
+        "sourceHandle": "NewsSearchTool_1/tool",
+        "target": "ToolCallingAgent_1",
+        "targetHandle": "ToolCallingAgent_1/tools/0",
+        "id": "edge_NewsSearchTool_1_tool_to_ToolCallingAgent_1_tools_0"
+      },
+      {
+        "source": "EmailSenderTool_1",
+        "sourceHandle": "EmailSenderTool_1/tool",
+        "target": "ToolCallingAgent_1",
+        "targetHandle": "ToolCallingAgent_1/tools/1",
+        "id": "edge_EmailSenderTool_1_tool_to_ToolCallingAgent_1_tools_1"
+      },
+      {
+        "source": "WaitForTaskResultTool_1",
+        "sourceHandle": "WaitForTaskResultTool_1/tool",
+        "target": "ToolCallingAgent_1",
+        "targetHandle": "ToolCallingAgent_1/tools/2",
+        "id": "edge_WaitForTaskResultTool_1_tool_to_ToolCallingAgent_1_tools_2"
+      },
+      {
+        "source": "ToolCallingAgent_1",
+        "sourceHandle": "ToolCallingAgent_1/response",
+        "target": "ChatOutput_1",
+        "targetHandle": "ChatOutput_1/input_value",
+        "id": "edge_ToolCallingAgent_1_response_to_ChatOutput_1_input_value"
+      }
+    ],
+    "viewport": { "x": -200, "y": 100, "zoom": 0.8 }
+  }
+}
+```
