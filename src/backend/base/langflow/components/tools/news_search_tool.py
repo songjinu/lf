@@ -1,164 +1,190 @@
-import asyncio # Keep for _arun, though direct sleep is removed
-import httpx # For making HTTP requests
-import uuid # For generating client_callback_id
-from typing import cast, Type, Optional, Any, Dict, List
+import asyncio
+from typing import cast, Type, Optional, Any, Dict
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 
 from langflow.base.langchain_utilities.model import LCToolComponent
 from langflow.field_typing import Tool
-from langflow.inputs import MessageTextInput, MultilineInput, SecretStrInput # Added SecretStrInput
-from langflow.schema import Data # Keep for consistency, though not directly used now
-# Removed TaskService, SocketService, and pending_tasks_store imports as they are no longer used by this tool's logic
+from langflow.inputs import MessageTextInput, SecretStrInput
 
-# Configuration for the external MCP server
-# This global can be overridden if the component's build_tool injects a different URL into the tool instance.
-DEFAULT_MCP_SERVER_URL = "http://localhost:8765"
+# Attempt to import MCP SDK components
+try:
+    from mcp import ClientSession, types as mcp_types # Assuming types might be needed for arguments
+    from mcp.client.streamable_http import streamablehttp_client
+    MCP_SDK_AVAILABLE = True
+except ImportError:
+    MCP_SDK_AVAILABLE = False
+    # Define dummy classes if SDK is not available, to allow module to load
+    class ClientSession:
+        def __init__(self, *args, **kwargs):
+            # This will be raised if someone tries to instantiate it when SDK is not there.
+            # The component's build_tool should ideally prevent this.
+            if not MCP_SDK_AVAILABLE: # Redundant check, but for clarity
+                 raise ImportError("MCP SDK not installed. Please install 'mcp' to use this tool.")
+        async def initialize(self, *args, **kwargs):
+            pass
+        async def call_tool(self, *args, **kwargs):
+            # Should not be reached if build_tool checks MCP_SDK_AVAILABLE
+            return {"error": "MCP SDK call_tool called on dummy session."}
+        async def __aenter__(self):
+            # Ensure __aenter__ returns self for the 'async with' context
+            return self
+        async def __aexit__(self, *args, **kwargs):
+            pass
+
+    def streamablehttp_client(*args, **kwargs):
+        class DummyStreamableClient:
+            async def __aenter__(self):
+                # Simulate returning dummy read_stream, write_stream for ClientSession constructor
+                async def dummy_read_stream():
+                    if False: # Make it an async generator
+                        yield b""
+
+                async def dummy_write_stream(data):
+                    pass
+
+                return (dummy_read_stream(), dummy_write_stream)
+            async def __aexit__(self, *args, **kwargs):
+                pass
+
+        # This check is crucial. If the SDK isn't there, this function itself should signal that
+        # streamablehttp_client cannot be properly used.
+        if not MCP_SDK_AVAILABLE:
+             raise ImportError("MCP SDK not installed. Please install 'mcp' to use this tool.")
+        return DummyStreamableClient()
+
+# Configuration for the MCP server
+DEFAULT_MCP_SERVER_URL = "http://localhost:8765/mcp" # MCP servers often mount at /mcp
 
 # Define the input schema for the tool's Langchain execution
-class NewsSearchMCPInput(BaseModel):
+class NewsSearchSDKInput(BaseModel):
     query: str = Field(description="The search query for news articles.")
-    # callback_url is no longer used by this tool directly; SSE is the callback mechanism
 
-# Define the actual Langchain Tool
-class NewsSearchExternalMCPTool(BaseTool):
-    name: str = "news_search_external_mcp" # Renamed to distinguish
+# Define the actual Langchain Tool using MCP SDK
+class NewsSearchExternalSDKTool(BaseTool):
+    name: str = "news_search_mcp_sdk" # Renamed to reflect SDK usage
     description: str = (
-        "Submits a news search task to an external MCP server and returns identifiers. "
-        "Results are delivered via a separate SSE mechanism."
+        "Searches for news articles by submitting a task to an MCP server using the mcp-sdk. "
+        "Returns the search results directly."
     )
-    args_schema: Type[BaseModel] = NewsSearchMCPInput
-    mcp_server_url: str # To be set on instantiation
+    args_schema: Type[BaseModel] = NewsSearchSDKInput
+    mcp_server_url: str
 
     def __init__(self, mcp_server_url: str = DEFAULT_MCP_SERVER_URL, **data: Any):
         super().__init__(**data)
-        self.mcp_server_url = mcp_server_url if mcp_server_url else DEFAULT_MCP_SERVER_URL
+        self.mcp_server_url = mcp_server_url if mcp_server_url and mcp_server_url.strip() else DEFAULT_MCP_SERVER_URL
 
+    async def _arun(self, query: str, **kwargs: Any) -> Any: # Return type is Any, could be Dict or List
+        if not MCP_SDK_AVAILABLE:
+            # This error will be returned if the component was somehow built without the SDK.
+            return {"error": "MCP SDK not installed. Please install 'mcp' to use this tool."}
 
-    async def _arun(self, query: str, **kwargs: Any) -> str:
-        client_callback_id = uuid.uuid4().hex
-
-        payload = {
-            "client_callback_id": client_callback_id,
-            "tool_name": "news_search", # This is the name the MCP server knows this tool by
-            "params": {"query": query}
-        }
-
-        submit_url = f"{self.mcp_server_url}/submit_task"
-        print(f"NewsSearchExternalMCPTool: Submitting task to {submit_url} with payload: {payload}")
+        print(f"NewsSearchExternalSDKTool: Connecting to MCP server at {self.mcp_server_url} for tool 'news_search'")
 
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(submit_url, json=payload, timeout=10.0)
+            # streamablehttp_client expects the full URL to the MCP endpoint.
+            async with streamablehttp_client(self.mcp_server_url) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session: # type: ignore
+                    await session.initialize()
+                    print(f"NewsSearchExternalSDKTool: Calling MCP tool 'news_search' with query: {query}")
 
-            response.raise_for_status() # Raise an exception for HTTP error codes (4xx or 5xx)
+                    # The tool name 'news_search' must match the name defined on the MCP server.
+                    # The arguments must match what the server-side tool expects.
+                    # Assuming mcp_types.ToolCallArguments is the correct way if types are strictly enforced by SDK.
+                    # For simplicity, passing dict if SDK allows. Let's assume dict is okay for now.
+                    tool_args = {"query": query} # mcp_types.ToolCallArguments(argument={"query": query})
 
-            mcp_response_data = response.json()
-            server_task_id = mcp_response_data.get("task_id")
+                    result = await session.call_tool("news_search", arguments=tool_args) # type: ignore
 
-            if not server_task_id:
-                error_msg = f"NewsSearchExternalMCPTool: Error - MCP server response missing 'task_id'. Response: {mcp_response_data}"
-                print(error_msg)
-                return error_msg # Return the error message directly
+                    print(f"NewsSearchExternalSDKTool: Received result from MCP server: {result}")
+                    # Assuming 'result' is the actual data (e.g., list of articles or a dict)
+                    # If the SDK has specific result objects, they might need conversion to dict/list.
+                    # e.g. if result is an SDK object: return result.to_dict() or similar
+                    return result
 
-            # Message includes both server_task_id and client_callback_id
-            # SSEListenerTool will primarily use client_callback_id to connect to the SSE stream.
-            # server_task_id can be used by the listener or agent to confirm it's the right task's data if needed.
-            return (
-                f"Task {server_task_id} submitted to MCP for news search. "
-                f"Use client_callback_id {client_callback_id} with SSEListenerTool for results."
-            )
-
-        except httpx.HTTPStatusError as e:
-            error_msg = f"NewsSearchExternalMCPTool: HTTP error submitting task to MCP: {e.response.status_code} - {e.response.text}"
-            print(error_msg)
-            return f"Error submitting task to MCP: HTTP {e.response.status_code}."
-        except httpx.RequestError as e:
-            error_msg = f"NewsSearchExternalMCPTool: Request error submitting task to MCP: {e}"
-            print(error_msg)
-            return f"Error submitting task to MCP: Could not connect or request failed ({type(e).__name__})."
+        except ImportError: # Should be caught by the top-level check, but good practice
+            return {"error": "MCP SDK is not installed."}
         except Exception as e:
-            error_msg = f"NewsSearchExternalMCPTool: Unexpected error: {e} ({type(e).__name__})"
-            print(error_msg)
-            return f"An unexpected error occurred: {type(e).__name__}."
+            # Catch specific SDK exceptions if known, otherwise general Exception
+            print(f"NewsSearchExternalSDKTool: Error during MCP SDK operation: {e} ({type(e).__name__})")
+            # Attempt to get more details from the exception if it's an SDK-specific one with more info
+            details = str(e)
+            if hasattr(e, 'details'): # Example of a potential custom attribute on SDK errors
+                details = getattr(e, 'details')
+            return {"error": f"MCP SDK operation failed: {type(e).__name__} - {details}"}
 
 # Define the Langflow component
 class NewsSearchToolComponent(LCToolComponent):
-    display_name = "News Search Tool (External MCP)"
-    description = "Submits a news search task to an external MCP server. Results via SSE."
-    # The 'name' attribute in LCToolComponent usually defaults to the class name.
-    # If you need to force it to "NewsSearchTool" for backward compatibility or specific registration,
-    # you might need to set it explicitly or ensure the registration mechanism handles the new class name.
-    # For now, let's assume Langflow handles components by their class name or a custom registration.
-    # name = "NewsSearchTool"
+    display_name = "News Search Tool (MCP SDK)"
+    description = "Searches for news using an MCP server via the mcp-sdk."
+    # name = "NewsSearchTool" # Retain original component name for UI consistency
     icon = "FileSearch"
-    tool_class = NewsSearchExternalMCPTool # For LCToolComponent to know which tool to build
+    tool_class: Type[BaseTool] = NewsSearchExternalSDKTool
 
-    inputs = LCToolComponent.get_fields_from_class(tool_class) + [ # Get args_schema fields automatically
+    inputs = LCToolComponent.get_fields_from_class(tool_class) + [
         SecretStrInput(
-            name="mcp_server_base_url", # This will be passed to the tool's constructor
-            display_name="MCP Server Base URL",
-            info="Base URL of the external MCP server (e.g., http://localhost:8765). If not set, uses default.",
-            required=False, # It has a default in the tool
+            name="mcp_server_url",
+            display_name="MCP Server URL",
+            info=f"Full URL of the MCP server endpoint (e.g., {DEFAULT_MCP_SERVER_URL}).",
+            required=False, # Uses default if not provided
             advanced=True,
-            value=DEFAULT_MCP_SERVER_URL # Default value shown in UI
+            value=DEFAULT_MCP_SERVER_URL
         )
     ]
 
-    def build_tool(self, **kwargs) -> BaseTool: # kwargs will contain 'mcp_server_base_url'
-        # The MCP server URL from the component's input field
-        mcp_url_from_input = kwargs.pop("mcp_server_base_url", DEFAULT_MCP_SERVER_URL)
-        if not mcp_url_from_input: # Handles empty string from UI
-            mcp_url_from_input = DEFAULT_MCP_SERVER_URL
+    def build_tool(self, **kwargs: Any) -> BaseTool:
+        if not MCP_SDK_AVAILABLE:
+            # This error is raised when trying to add/build the component in Langflow if SDK is missing.
+            raise ImportError("MCP SDK not installed. This component requires 'pip install mcp'.")
 
-        # All other kwargs should be parameters for the tool's args_schema,
-        # but NewsSearchExternalMCPTool doesn't take them in constructor, _arun gets them.
-        # LCToolComponent usually handles passing these to _arun.
-        # We need to ensure only non-args_schema params are popped if any.
+        mcp_url = kwargs.pop("mcp_server_url", DEFAULT_MCP_SERVER_URL)
+        if not mcp_url or not mcp_url.strip(): # Ensure not empty or just whitespace
+            mcp_url = DEFAULT_MCP_SERVER_URL
 
-        return NewsSearchExternalMCPTool(mcp_server_url=mcp_url_from_input, **kwargs)
+        # kwargs should be empty here as 'query' is an _arun parameter, not a constructor one.
+        return self.tool_class(mcp_server_url=mcp_url) # Removed **kwargs
 
 
-# Standalone test block (optional, good for quick verification if runnable outside Langflow)
 async def main():
-    # This test would require a mock MCP server endpoint.
+    if not MCP_SDK_AVAILABLE:
+        print("MCP SDK not available, skipping main test logic for NewsSearchTool.")
+        return
 
-    # Scenario 1: Using default MCP URL
-    print("--- Scenario 1: Default MCP URL ---")
-    component1 = NewsSearchToolComponent() #This would be how Langflow instantiates it
-    # In Langflow, build_tool is called with resolved input values
-    # Let's simulate that:
-    tool_instance1_args = {field.name: field.value for field in component1.inputs if hasattr(field, 'value')}
-    tool_instance1_args['mcp_server_base_url'] = DEFAULT_MCP_SERVER_URL # Explicitly set for clarity
+    print("NewsSearchToolComponent (SDK version) conceptual test:")
 
-    # Simulate how LCToolComponent might build the tool
-    # The actual call from Langflow would be more complex, involving resolving all inputs
-    # For this tool, mcp_server_base_url is a constructor arg for the *component*, then passed to tool
+    # Simulate component instantiation and tool building
+    component = NewsSearchToolComponent()
 
-    # Let's assume the component is instantiated and then build_tool is called with the value from the UI field
-    # For testing `build_tool` more directly:
-    tool_instance1 = component1.build_tool(mcp_server_base_url=DEFAULT_MCP_SERVER_URL, query="AI in 2024") # query is an _arun arg
-    print(f"Tool 1 instance created with MCP URL: {tool_instance1.mcp_server_url}")
-    # result1 = await tool_instance1._arun(query="AI in 2024") # Requires mock server
-    # print(f"Result 1: {result1}")
+    # Test with default URL
+    try:
+        tool_default_url = component.build_tool(mcp_server_url="") # "" should trigger default
+        print(f"Tool built with MCP URL: {tool_default_url.mcp_server_url}") # type: ignore
+        assert tool_default_url.mcp_server_url == DEFAULT_MCP_SERVER_URL # type: ignore
 
+        # Test with custom URL
+        custom_url = "http://my-custom-mcp.com:8000/mcp_custom_path"
+        tool_custom_url = component.build_tool(mcp_server_url=custom_url)
+        print(f"Tool built with MCP URL: {tool_custom_url.mcp_server_url}") # type: ignore
+        assert tool_custom_url.mcp_server_url == custom_url # type: ignore
 
-    # Scenario 2: Using custom MCP URL from component input
-    print("\n--- Scenario 2: Custom MCP URL ---")
-    custom_url = "http://my-custom-mcp:9000"
-    component2 = NewsSearchToolComponent()
-    tool_instance2 = component2.build_tool(mcp_server_base_url=custom_url, query="Future of AI")
-    print(f"Tool 2 instance created with MCP URL: {tool_instance2.mcp_server_url}")
-    # result2 = await tool_instance2._arun(query="Future of AI") # Requires mock server
-    # print(f"Result 2: {result2}")
+        print("\nNewsSearchExternalSDKTool instance can be created with different MCP URLs.")
+        print("Standalone _arun test would require a running MCP server and the 'mcp' SDK installed.")
 
-    print("\nNewsSearchExternalMCPTool instance creation tested. Standalone _arun test would require a mock MCP server.")
+        # Example of how it might be called (requires mock server & SDK):
+        # print("\nSimulating _arun call (requires actual MCP server and SDK)...")
+        # test_query = "latest AI advancements"
+        # # Assuming tool_custom_url is correctly initialized
+        # # result = await tool_custom_url._arun(query=test_query)
+        # # print(f"Result from _arun for query '{test_query}': {result}")
+
+    except ImportError as e:
+        print(f"ImportError during main test: {e}") # Should be caught if SDK not installed
 
 if __name__ == "__main__":
-    # To run main, you'd need to define or import LCToolComponent.get_fields_from_class
-    # For now, this structure is for conceptual testing.
-    # asyncio.run(main()) # Commented out as it needs a mock server and LCToolComponent setup
-    print("To run main for NewsSearchToolComponent, LCToolComponent context is needed or mocks for its methods.")
+    # To run main effectively, LCToolComponent and its methods like get_fields_from_class
+    # would need to be available in the execution context, or mocked.
+    # asyncio.run(main())
+    print("To run main for NewsSearchToolComponent (SDK), LCToolComponent context is needed or mocks for its methods.")
     pass
 ```

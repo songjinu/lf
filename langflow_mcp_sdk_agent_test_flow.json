@@ -1,0 +1,228 @@
+{
+  "name": "MCP SDK Agent Test Flow",
+  "description": "A flow to test an agent with tools using the mcp-sdk to interact with an external MCP server.",
+  "data": {
+    "nodes": [
+      {
+        "id": "ChatInput_SDK_1",
+        "data": {
+          "node": {
+            "template": {
+              "input_value": { "value": "", "type": "str", "show": true, "name": "input_value", "display_name": "Input Value" },
+              "sender": { "value": "User", "type": "str", "show": true, "name": "sender", "display_name": "Sender" },
+              "sender_name": { "value": "User", "type": "str", "show": true, "name": "sender_name", "display_name": "Sender Name" },
+              "session_id": { "value": "", "type": "str", "advanced": true, "show": true, "name": "session_id", "display_name": "Session ID" },
+              "files": { "value": [], "type": "list", "advanced": true, "show": true, "name": "files", "display_name": "Files" }
+            },
+            "display_name": "Chat Input",
+            "name": "ChatInput",
+            "description": "Input component for chat interactions.",
+            "beta": false,
+            "icon": "ChatInput",
+            "type": "ChatInput"
+          },
+          "inputs": {},
+          "outputs": [
+            { "name": "message", "id": "ChatInput_SDK_1/message", "type": "ChatMessage", "display_name": "Message", "value": "ChatInput_SDK_1/message" }
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 0, "y": 0 },
+        "width": 300,
+        "height": 318
+      },
+      {
+        "id": "OpenAIModel_SDK_1",
+        "data": {
+          "node": {
+            "template": {
+              "model_name": { "value": "gpt-4o-mini", "type": "str", "show": true, "name": "model_name", "display_name": "Model Name" },
+              "temperature": { "value": 0.1, "type": "float", "show": true, "name": "temperature", "display_name": "Temperature" },
+              "max_tokens": { "value": 4096, "type": "int", "advanced": true, "show": true, "name": "max_tokens", "display_name": "Max Tokens" },
+              "openai_api_key": { "value": null, "type": "str", "required": true, "show": true, "password": true, "name": "openai_api_key", "display_name": "OpenAI API Key", "placeholder": "sk-...", "advanced": false}
+            },
+            "display_name": "OpenAI Model",
+            "name": "OpenAIModel",
+            "description": "LLM using OpenAI API.",
+            "beta": false,
+            "icon": "OpenAI",
+            "type": "OpenAIModel"
+          },
+          "inputs": {},
+          "outputs": [
+            { "name": "output", "id": "OpenAIModel_SDK_1/output", "type": "LanguageModel", "display_name": "LanguageModel", "value": "OpenAIModel_SDK_1/output" }
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 0, "y": 350 },
+        "width": 300,
+        "height": 334
+      },
+      {
+        "id": "NewsSearchTool_SDK_1",
+        "data": {
+          "node": {
+            "template": {
+              "query": {"type": "str", "required": true, "show": true, "value": "", "name": "query", "display_name": "Search Query"},
+              "mcp_server_url": {"type": "str", "required": false, "show": true, "advanced": true, "value": "http://localhost:8765/mcp", "name": "mcp_server_url", "display_name": "MCP Server URL"}
+            },
+            "display_name": "News Search Tool (MCP SDK)",
+            "name": "NewsSearchTool",
+            "description": "Searches for news using an MCP server via the mcp-sdk.",
+            "beta": false,
+            "icon": "FileSearch",
+            "type": "NewsSearchTool"
+          },
+          "inputs": {},
+          "outputs": [
+            { "name": "tool", "id": "NewsSearchTool_SDK_1/tool", "type": "Tool", "display_name": "Tool", "value":"NewsSearchTool_SDK_1/tool" }
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 350, "y": 50 },
+        "width": 300,
+        "height": 218
+      },
+      {
+        "id": "EmailSenderTool_SDK_1",
+        "data": {
+          "node": {
+            "template": {
+              "content": {"type": "str", "required": true, "show": true, "multiline": true, "value": "", "name": "content", "display_name": "Email Content"},
+              "recipient": {"type": "str", "required": true, "show": true, "value": "", "name": "recipient", "display_name": "Recipient Email"},
+              "mcp_server_url": {"type": "str", "required": false, "show": true, "advanced": true, "value": "http://localhost:8765/mcp", "name": "mcp_server_url", "display_name": "MCP Server URL"}
+            },
+            "display_name": "Email Sender Tool (MCP SDK)",
+            "name": "EmailSenderTool",
+            "description": "Sends an email using an MCP server via the mcp-sdk.",
+            "beta": false,
+            "icon": "Mail",
+            "type": "EmailSenderTool"
+          },
+          "inputs": {},
+          "outputs": [
+            { "name": "tool", "id": "EmailSenderTool_SDK_1/tool", "type": "Tool", "display_name": "Tool", "value": "EmailSenderTool_SDK_1/tool" }
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 350, "y": 300 },
+        "width": 300,
+        "height": 266
+      },
+      {
+        "id": "ToolCallingAgent_SDK_1",
+        "data": {
+          "node": {
+            "template": {
+              "llm": {"type": "LanguageModel", "required": true, "show": true, "name": "llm", "display_name": "LLM"},
+              "tools": {"type": "Tool", "required": true, "show": true, "is_list": true, "name": "tools", "display_name": "Tools"},
+              "input_value": {"type": "ChatMessage", "required": true, "show": true, "name": "input_value", "display_name": "Input"},
+              "system_prompt": {
+                "type": "str",
+                "show": true,
+                "multiline": true,
+                "value": "You are a helpful assistant that can search for news and send emails using specialized tools.\n\nWhen you use 'NewsSearchTool', it will directly return the search results (e.g., a list of news articles).\nWhen you use 'EmailSenderTool', it will directly return the status of the email sending operation (e.g., a success or failure message).\n\nIf you need to search for news and then email it, you should:\n1. Use 'NewsSearchTool' with the search query to get the news articles.\n2. Use 'EmailSenderTool' with the news articles obtained from 'NewsSearchTool' and the recipient's email address to send the email.\n3. Use the status returned by 'EmailSenderTool' to formulate your final response.\n\nYou will receive the actual data or status directly from these tools. There is no need to wait or use other tools to get these results.",
+                "name": "system_prompt",
+                "display_name": "System Prompt"
+              },
+              "user_prompt": { "type": "str", "show": true, "value": "{input_value}", "name": "user_prompt", "display_name": "User Prompt"},
+              "chat_history": {"type": "Data", "required": false, "show": true, "is_list": true, "advanced": true, "name": "chat_history", "display_name": "Chat History"},
+              "handle_parsing_errors": {"type": "bool", "required": false, "show": true, "value": true, "advanced": true, "name": "handle_parsing_errors", "display_name": "Handle Parsing Errors"},
+              "verbose": {"type": "bool", "required": false, "show": true, "value": true, "advanced": true, "name": "verbose", "display_name": "Verbose"},
+              "max_iterations": {"type": "int", "required": false, "show": true, "value": 10, "advanced": true, "name": "max_iterations", "display_name": "Max Iterations"}
+            },
+            "display_name": "MCP SDK Agent",
+            "name": "ToolCallingAgent",
+            "description": "Agent using mcp-sdk based tools that return results directly.",
+            "beta": true,
+            "icon": "LangChain",
+            "type": "ToolCallingAgent"
+          },
+          "inputs": {
+            "llm": {"name": "llm", "id": "OpenAIModel_SDK_1/output", "type": "LanguageModel", "value": "OpenAIModel_SDK_1/output"},
+            "tools": [
+              {"name": "tools", "id": "NewsSearchTool_SDK_1/tool", "type": "Tool", "value": "NewsSearchTool_SDK_1/tool"},
+              {"name": "tools", "id": "EmailSenderTool_SDK_1/tool", "type": "Tool", "value": "EmailSenderTool_SDK_1/tool"}
+            ],
+            "input_value": {"name": "input_value", "id": "ChatInput_SDK_1/message", "type": "ChatMessage", "value": "ChatInput_SDK_1/message"}
+          },
+          "outputs": [
+            { "name": "agent", "id": "ToolCallingAgent_SDK_1/agent", "type": "AgentExecutor", "display_name": "Agent Executor", "value": "ToolCallingAgent_SDK_1/agent"},
+            { "name": "response", "id": "ToolCallingAgent_SDK_1/response", "type": "ChatMessage", "display_name": "Response", "value": "ToolCallingAgent_SDK_1/response"}
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 700, "y": 100 },
+        "width": 300,
+        "height": 650
+      },
+      {
+        "id": "ChatOutput_SDK_1",
+        "data": {
+          "node": {
+            "template": {
+              "input_value": { "type": "ChatMessage", "required": true, "show": true, "name": "input_value", "display_name": "Input Value"},
+              "sender": { "value": "AI", "type": "str", "show": true, "name": "sender", "display_name": "Sender" },
+              "sender_name": { "value": "MCP SDK Agent", "type": "str", "show": true, "name": "sender_name", "display_name": "Sender Name" },
+              "session_id": { "value": "", "type": "str", "advanced": true, "show": true, "name": "session_id", "display_name": "Session ID" },
+              "data_triggers": { "type": "Data", "required": false, "show": true, "is_list": true, "value": "", "advanced": true, "name": "data_triggers", "display_name": "Data Triggers"}
+            },
+            "display_name": "Chat Output",
+            "name": "ChatOutput",
+            "description": "Output component for chat interactions.",
+            "beta": false,
+            "icon": "ChatOutput",
+            "type": "ChatOutput"
+          },
+          "inputs": {
+             "input_value": {"name": "input_value", "id": "ToolCallingAgent_SDK_1/response", "type": "ChatMessage", "value": "ToolCallingAgent_SDK_1/response"}
+          },
+          "outputs": []
+        },
+        "type": "genericNode",
+        "position": { "x": 1050, "y": 100 },
+        "width": 300,
+        "height": 334
+      }
+    ],
+    "edges": [
+      {
+        "source": "ChatInput_SDK_1",
+        "sourceHandle": "ChatInput_SDK_1/message",
+        "target": "ToolCallingAgent_SDK_1",
+        "targetHandle": "ToolCallingAgent_SDK_1/input_value",
+        "id": "edge_ChatInput_SDK_1_message_to_ToolCallingAgent_SDK_1_input_value"
+      },
+      {
+        "source": "OpenAIModel_SDK_1",
+        "sourceHandle": "OpenAIModel_SDK_1/output",
+        "target": "ToolCallingAgent_SDK_1",
+        "targetHandle": "ToolCallingAgent_SDK_1/llm",
+        "id": "edge_OpenAIModel_SDK_1_output_to_ToolCallingAgent_SDK_1_llm"
+      },
+      {
+        "source": "NewsSearchTool_SDK_1",
+        "sourceHandle": "NewsSearchTool_SDK_1/tool",
+        "target": "ToolCallingAgent_SDK_1",
+        "targetHandle": "ToolCallingAgent_SDK_1/tools/0",
+        "id": "edge_NewsSearchTool_SDK_1_tool_to_ToolCallingAgent_SDK_1_tools_0"
+      },
+      {
+        "source": "EmailSenderTool_SDK_1",
+        "sourceHandle": "EmailSenderTool_SDK_1/tool",
+        "target": "ToolCallingAgent_SDK_1",
+        "targetHandle": "ToolCallingAgent_SDK_1/tools/1",
+        "id": "edge_EmailSenderTool_SDK_1_tool_to_ToolCallingAgent_SDK_1_tools_1"
+      },
+      {
+        "source": "ToolCallingAgent_SDK_1",
+        "sourceHandle": "ToolCallingAgent_SDK_1/response",
+        "target": "ChatOutput_SDK_1",
+        "targetHandle": "ChatOutput_SDK_1/input_value",
+        "id": "edge_ToolCallingAgent_SDK_1_response_to_ChatOutput_SDK_1_input_value"
+      }
+    ],
+    "viewport": { "x": -150, "y": 180, "zoom": 0.7 }
+  }
+}
+```

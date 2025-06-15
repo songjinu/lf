@@ -1,6 +1,4 @@
-import asyncio # Keep for _arun
-import httpx # For making HTTP requests
-import uuid # For generating client_callback_id
+import asyncio
 from typing import cast, Type, Optional, Any, Dict
 
 from langchain_core.tools import BaseTool
@@ -8,143 +6,174 @@ from pydantic import BaseModel, Field
 
 from langflow.base.langchain_utilities.model import LCToolComponent
 from langflow.field_typing import Tool
-from langflow.inputs import MessageTextInput, MultilineInput, SecretStrInput
+from langflow.inputs import MultilineInput, MessageTextInput, SecretStrInput
 
-# Configuration for the external MCP server
-DEFAULT_MCP_SERVER_URL = "http://localhost:8765"
+# Attempt to import MCP SDK components
+try:
+    from mcp import ClientSession, types as mcp_types
+    from mcp.client.streamable_http import streamablehttp_client
+    MCP_SDK_AVAILABLE = True
+except ImportError:
+    MCP_SDK_AVAILABLE = False
+    class ClientSession:
+        def __init__(self, *args, **kwargs):
+            if not MCP_SDK_AVAILABLE:
+                 raise ImportError("MCP SDK not installed. Please install 'mcp' to use this tool.")
+        async def initialize(self, *args, **kwargs):
+            pass
+        async def call_tool(self, *args, **kwargs):
+            return {"error": "MCP SDK call_tool called on dummy session."}
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args, **kwargs):
+            pass
+
+    def streamablehttp_client(*args, **kwargs):
+        class DummyStreamableClient:
+            async def __aenter__(self):
+                async def dummy_read_stream():
+                    if False: yield b""
+                async def dummy_write_stream(data):
+                    pass
+                return (dummy_read_stream(), dummy_write_stream)
+            async def __aexit__(self, *args, **kwargs):
+                pass
+        if not MCP_SDK_AVAILABLE:
+            raise ImportError("MCP SDK not installed. Please install 'mcp' to use this tool.")
+        return DummyStreamableClient()
+
+# Configuration for the MCP server
+DEFAULT_MCP_SERVER_URL = "http://localhost:8765/mcp"
 
 # Define the input schema for the tool's Langchain execution
-class EmailSenderMCPInput(BaseModel):
+class EmailSenderSDKInput(BaseModel):
     content: str = Field(description="The content of the email to be sent.")
     recipient: str = Field(description="The email address of the recipient.")
 
-# Define the actual Langchain Tool
-class EmailSenderExternalMCPTool(BaseTool):
-    name: str = "email_sender_external_mcp" # Renamed
+# Define the actual Langchain Tool using MCP SDK
+class EmailSenderExternalSDKTool(BaseTool):
+    name: str = "email_sender_mcp_sdk" # Renamed for SDK
     description: str = (
-        "Submits an email sending task to an external MCP server and returns identifiers. "
-        "Status is delivered via a separate SSE mechanism."
+        "Sends an email by submitting a task to an MCP server using the mcp-sdk. "
+        "Returns the status directly."
     )
-    args_schema: Type[BaseModel] = EmailSenderMCPInput
-    mcp_server_url: str # To be configured via component
+    args_schema: Type[BaseModel] = EmailSenderSDKInput
+    mcp_server_url: str
 
     def __init__(self, mcp_server_url: str = DEFAULT_MCP_SERVER_URL, **data: Any):
         super().__init__(**data)
-        # Ensure mcp_server_url is not an empty string, use default if it is.
         self.mcp_server_url = mcp_server_url if mcp_server_url and mcp_server_url.strip() else DEFAULT_MCP_SERVER_URL
 
+    async def _arun(self, content: str, recipient: str, **kwargs: Any) -> Any:
+        if not MCP_SDK_AVAILABLE:
+            return {"error": "MCP SDK not installed. Please install 'mcp' to use this tool."}
 
-    async def _arun(self, content: str, recipient: str, **kwargs: Any) -> str:
-        client_callback_id = uuid.uuid4().hex
-
-        payload = {
-            "client_callback_id": client_callback_id,
-            "tool_name": "email_sender",
-            "params": {"content": content, "recipient": recipient}
-        }
-
-        submit_url = f"{self.mcp_server_url}/submit_task"
-        print(f"EmailSenderExternalMCPTool: Submitting task to {submit_url} with payload: {payload}")
+        print(f"EmailSenderExternalSDKTool: Connecting to MCP server at {self.mcp_server_url} for tool 'email_sender'")
 
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(submit_url, json=payload, timeout=10.0)
+            async with streamablehttp_client(self.mcp_server_url) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session: # type: ignore
+                    await session.initialize()
+                    print(f"EmailSenderExternalSDKTool: Calling MCP tool 'email_sender' for recipient: {recipient}")
 
-            response.raise_for_status()
+                    tool_args = {"content": content, "recipient": recipient}
+                    # Consider mcp_types.ToolCallArguments if SDK requires strict typing for arguments
+                    # tool_args = mcp_types.ToolCallArguments(argument={"content": content, "recipient": recipient})
 
-            mcp_response_data = response.json()
-            server_task_id = mcp_response_data.get("task_id")
 
-            if not server_task_id:
-                error_msg = f"EmailSenderExternalMCPTool: Error - MCP server response missing 'task_id'. Response: {mcp_response_data}"
-                print(error_msg)
-                return error_msg # Return the error message directly
+                    result = await session.call_tool("email_sender", arguments=tool_args) # type: ignore
 
-            return (
-                f"Task {server_task_id} submitted to MCP for sending email. "
-                f"Use client_callback_id {client_callback_id} with SSEListenerTool for status."
-            )
+                    print(f"EmailSenderExternalSDKTool: Received result from MCP server: {result}")
+                    # Expect result to be something like {"status": "success", "message": "Email sent"}
+                    return result
 
-        except httpx.HTTPStatusError as e:
-            error_msg = f"EmailSenderExternalMCPTool: HTTP error submitting task to MCP: {e.response.status_code} - {e.response.text}"
-            print(error_msg)
-            return f"Error submitting task to MCP: HTTP {e.response.status_code}."
-        except httpx.RequestError as e:
-            error_msg = f"EmailSenderExternalMCPTool: Request error submitting task to MCP: {e}"
-            print(error_msg)
-            return f"Error submitting task to MCP: Could not connect or request failed ({type(e).__name__})."
+        except ImportError:
+             return {"error": "MCP SDK is not installed."} # Fallback, should be caught earlier
         except Exception as e:
-            error_msg = f"EmailSenderExternalMCPTool: Unexpected error: {e} ({type(e).__name__})"
-            print(error_msg)
-            return f"An unexpected error occurred: {type(e).__name__}."
+            print(f"EmailSenderExternalSDKTool: Error during MCP SDK operation: {e} ({type(e).__name__})")
+            details = str(e)
+            if hasattr(e, 'details'): # Example for more detailed error from SDK
+                details = getattr(e, 'details')
+            return {"error": f"MCP SDK operation failed: {type(e).__name__} - {details}"}
 
 # Define the Langflow component
 class EmailSenderToolComponent(LCToolComponent):
-    display_name = "Email Sender Tool (External MCP)"
-    description = "Submits an email sending task to an external MCP server. Status via SSE."
-    # name = "EmailSenderTool" # Let Langflow use class name or define custom registration if needed
+    display_name = "Email Sender Tool (MCP SDK)"
+    description = "Sends an email using an MCP server via the mcp-sdk."
+    # name = "EmailSenderTool" # Retain original component name for UI consistency
     icon = "Mail"
-    tool_class: Type[BaseTool] = EmailSenderExternalMCPTool
+    tool_class: Type[BaseTool] = EmailSenderExternalSDKTool
+
+    _field_order = ["content", "recipient", "mcp_server_url"] # To influence UI order if needed
+
+    # For LCToolComponent, inputs are often derived. If specific Langflow input types
+    # (like MultilineInput for 'content') are desired beyond what Pydantic model hints provide,
+    # manual definition or customization of `get_fields_from_class` might be needed.
+    # The current setup relies on LCToolComponent's default behavior for args_schema.
+    # To explicitly set 'content' as MultilineInput, one might need to override `get_input_fields`
+    # or adjust how `inputs` is defined.
+    # For this iteration, we use the default derivation and add mcp_server_url.
 
     inputs = LCToolComponent.get_fields_from_class(tool_class) + [
         SecretStrInput(
-            name="mcp_server_base_url", # Consistent naming
-            display_name="MCP Server Base URL", # Removed "(Optional)" as it defaults
-            info="Base URL of the external MCP server (e.g., http://localhost:8765). If not set, uses default.",
-            required=False, # It has a default in the tool
+            name="mcp_server_url",
+            display_name="MCP Server URL",
+            info=f"Full URL of the MCP server endpoint (e.g., {DEFAULT_MCP_SERVER_URL}).",
+            required=False, # Uses default if not provided
             advanced=True,
             value=DEFAULT_MCP_SERVER_URL
         )
     ]
 
     def build_tool(self, **kwargs: Any) -> BaseTool:
-        # Pop mcp_server_base_url for the tool's constructor, others are for _arun
-        mcp_url = kwargs.pop("mcp_server_base_url", DEFAULT_MCP_SERVER_URL)
-        if not mcp_url or not mcp_url.strip(): # Ensure not empty or just whitespace
+        if not MCP_SDK_AVAILABLE:
+            raise ImportError("MCP SDK not installed. This component requires 'pip install mcp'.")
+
+        mcp_url = kwargs.pop("mcp_server_url", DEFAULT_MCP_SERVER_URL)
+        if not mcp_url or not mcp_url.strip():
             mcp_url = DEFAULT_MCP_SERVER_URL
 
-        # The remaining kwargs are for the _arun method, LCToolComponent handles this.
-        # We only pass constructor-specific args here.
-        # If EmailSenderExternalMCPTool had other constructor args besides mcp_server_url and standard Pydantic ones,
-        # they would be handled here.
+        # kwargs for tool constructor should be empty here, as content/recipient are _arun params
         return self.tool_class(mcp_server_url=mcp_url)
 
 
-# Standalone test block
 async def main():
-    # This main function is for conceptual testing of component instantiation logic.
-    # It assumes LCToolComponent.get_fields_from_class is available or mocked if run directly.
-    print("--- EmailSenderToolComponent Standalone Test ---")
+    if not MCP_SDK_AVAILABLE:
+        print("MCP SDK not available, skipping main test logic for EmailSenderTool.")
+        return
 
-    # Simulate Langflow instantiating the component (simplified)
-    # In a real scenario, Langflow does this and provides the UI fields.
-    # For testing `build_tool`, we can call it directly.
+    print("EmailSenderToolComponent (SDK version) conceptual test:")
+    component = EmailSenderToolComponent()
 
-    # Test with default URL
-    # When Langflow calls build_tool, it passes values from UI fields.
-    # If "mcp_server_base_url" is not provided or empty, the default should be used.
-    component_default = EmailSenderToolComponent() # In Langflow, this would be its representation
+    try:
+        tool_default_url = component.build_tool(mcp_server_url="")
+        print(f"Tool built with MCP URL: {tool_default_url.mcp_server_url}") # type: ignore
+        assert tool_default_url.mcp_server_url == DEFAULT_MCP_SERVER_URL # type: ignore
 
-    # Simulating build_tool call as Langflow would, with UI values
-    # Case 1: UI field is empty or not touched (so default applies)
-    tool_instance_default = component_default.build_tool(mcp_server_base_url="")
-    print(f"Tool with default MCP URL (from empty input): {tool_instance_default.mcp_server_url}")
-    assert tool_instance_default.mcp_server_url == DEFAULT_MCP_SERVER_URL
+        custom_url = "http://my-mcp-server.org/mcp_email_path"
+        tool_custom_url = component.build_tool(mcp_server_url=custom_url)
+        print(f"Tool built with MCP URL: {tool_custom_url.mcp_server_url}") # type: ignore
+        assert tool_custom_url.mcp_server_url == custom_url # type: ignore
 
-    # Case 2: UI field has a value
-    custom_url = "http://custom-mcp-server:1234"
-    tool_instance_custom = component_default.build_tool(mcp_server_base_url=custom_url)
-    print(f"Tool with custom MCP URL: {tool_instance_custom.mcp_server_url}")
-    assert tool_instance_custom.mcp_server_url == custom_url
+        print("\nEmailSenderExternalSDKTool instance can be created with different MCP URLs.")
+        print("Standalone _arun test would require a running MCP server and the 'mcp' SDK installed.")
 
-    print("\nEmailSenderExternalMCPTool instance creation logic tested.")
-    print("Standalone _arun test would require a running mock MCP server and actual parameters (content, recipient).")
+        # Example of how _arun might be called (requires mock server & SDK):
+        # print("\nSimulating _arun call (requires actual MCP server and SDK)...")
+        # test_content = "Hello from Langflow via MCP SDK!"
+        # test_recipient = "sdk_test@example.com"
+        # # Assuming tool_custom_url is correctly initialized
+        # # status = await tool_custom_url._arun(content=test_content, recipient=test_recipient)
+        # # print(f"Result from _arun for sending email to '{test_recipient}': {status}")
+
+    except ImportError as e:
+        print(f"ImportError during main test: {e}")
+
 
 if __name__ == "__main__":
-    # To run this main effectively, LCToolComponent and its methods like get_fields_from_class
+    # To run main effectively, LCToolComponent and its methods like get_fields_from_class
     # would need to be available in the execution context, or mocked.
-    # This is primarily for illustrating the component's build logic.
-    # asyncio.run(main()) # Actual _arun calls are not made here.
-    print("To run main for EmailSenderToolComponent, LCToolComponent context is needed or mocks for its methods.")
+    # asyncio.run(main())
+    print("To run main for EmailSenderToolComponent (SDK), LCToolComponent context is needed or mocks for its methods.")
     pass
 ```
