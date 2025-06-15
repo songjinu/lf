@@ -1,158 +1,150 @@
-import asyncio
-from typing import cast, Type, Optional, Any, Dict, List
-from uuid import uuid4
+import asyncio # Keep for _arun
+import httpx # For making HTTP requests
+import uuid # For generating client_callback_id
+from typing import cast, Type, Optional, Any, Dict
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 
 from langflow.base.langchain_utilities.model import LCToolComponent
-from langflow.field_typing import Tool # BaseTool is Langchain's, Tool could be Langflow's specific type alias
-from langflow.inputs import MessageTextInput, MultilineInput
-from langflow.schema import Data
-from langflow.services.deps import get_task_service, get_socket_service
-from langflow.utils.pending_tasks_store import set_task_result
+from langflow.field_typing import Tool
+from langflow.inputs import MessageTextInput, MultilineInput, SecretStrInput
 
-# Define the input schema for the tool
-class EmailSenderInput(BaseModel):
+# Configuration for the external MCP server
+DEFAULT_MCP_SERVER_URL = "http://localhost:8765"
+
+# Define the input schema for the tool's Langchain execution
+class EmailSenderMCPInput(BaseModel):
     content: str = Field(description="The content of the email to be sent.")
     recipient: str = Field(description="The email address of the recipient.")
-    callback_url: Optional[str] = Field(description="Optional callback URL to send status to.", default=None)
 
 # Define the actual Langchain Tool
-class EmailSenderLangchainTool(BaseTool):
-    name: str = "email_sender"
-    description: str = "Sends an email with the given content to the recipient and returns a task_id. Status is sent via callback."
-    args_schema: Type[BaseModel] = EmailSenderInput
-    task_service: Any # Will be injected
-    socket_service: Any # Will be injected for callback simulation
+class EmailSenderExternalMCPTool(BaseTool):
+    name: str = "email_sender_external_mcp" # Renamed
+    description: str = (
+        "Submits an email sending task to an external MCP server and returns identifiers. "
+        "Status is delivered via a separate SSE mechanism."
+    )
+    args_schema: Type[BaseModel] = EmailSenderMCPInput
+    mcp_server_url: str # To be configured via component
 
-    def _run(self, content: str, recipient: str, callback_url: Optional[str] = None, **kwargs: Any) -> str:
-        raise NotImplementedError("Use arun for asynchronous operation")
+    def __init__(self, mcp_server_url: str = DEFAULT_MCP_SERVER_URL, **data: Any):
+        super().__init__(**data)
+        # Ensure mcp_server_url is not an empty string, use default if it is.
+        self.mcp_server_url = mcp_server_url if mcp_server_url and mcp_server_url.strip() else DEFAULT_MCP_SERVER_URL
 
-    async def _arun(self, content: str, recipient: str, callback_url: Optional[str] = None, **kwargs: Any) -> str:
-        task_id = uuid4().hex
 
-        async def actual_email_task(content: str, recipient: str, task_id: str, callback_url: Optional[str], session_id: Optional[str] = None):
-            await asyncio.sleep(1) # Simulate email sending delay
-            email_status = f"Email to {recipient} with content snippet '{content[:30]}...' sent successfully."
+    async def _arun(self, content: str, recipient: str, **kwargs: Any) -> str:
+        client_callback_id = uuid.uuid4().hex
 
-            log_message = f"MCP Server (EmailSenderTool): Task {task_id} complete. Result: {email_status}. Calling back to {callback_url or 'internal handler'}."
-            print(log_message) # Keep for logging
+        payload = {
+            "client_callback_id": client_callback_id,
+            "tool_name": "email_sender",
+            "params": {"content": content, "recipient": recipient}
+        }
 
-            # Store result for WaitForTaskResultTool
-            set_task_result(task_id, {"status": "success", "message": email_status})
+        submit_url = f"{self.mcp_server_url}/submit_task"
+        print(f"EmailSenderExternalMCPTool: Submitting task to {submit_url} with payload: {payload}")
 
-            if self.socket_service and callback_url is None:
-                if session_id:
-                    await self.socket_service.emit_message(to=session_id, data={
-                        "type": "tool_callback",
-                        "task_id": task_id,
-                        "tool_name": self.name,
-                        "results": {"status": "success", "message": email_status}
-                    })
-                else:
-                    print(f"Warning: session_id not provided for internal callback for task {task_id}. Cannot emit socket message.")
-            elif callback_url:
-                # In a real scenario, you'd make an HTTP POST request to callback_url
-                # Example:
-                # async with aiohttp.ClientSession() as session:
-                #     await session.post(callback_url, json={"task_id": task_id, "results": {"status": "success", "message": email_status}})
-                print(f"MCP Server: Would attempt HTTP POST to {callback_url} with status for task {task_id}.")
-                pass # Placeholder for actual HTTP callback
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(submit_url, json=payload, timeout=10.0)
 
-            return {"task_id": task_id, "status": "completed", "message": email_status} # This return is for the task_service
+            response.raise_for_status()
 
-        print(f"EmailSenderTool: Received request to send email to '{recipient}'. Requesting MCP server to process. Task ID will be {task_id}.")
+            mcp_response_data = response.json()
+            server_task_id = mcp_response_data.get("task_id")
 
-        session_id = kwargs.get("session_id")
+            if not server_task_id:
+                error_msg = f"EmailSenderExternalMCPTool: Error - MCP server response missing 'task_id'. Response: {mcp_response_data}"
+                print(error_msg)
+                return error_msg # Return the error message directly
 
-        await self.task_service.launch_task(actual_email_task, content, recipient, task_id, callback_url, session_id)
+            return (
+                f"Task {server_task_id} submitted to MCP for sending email. "
+                f"Use client_callback_id {client_callback_id} with SSEListenerTool for status."
+            )
 
-        return f"Task {task_id} initiated for sending email to {recipient}. Status will be sent via callback to {callback_url or 'internal handler (requires session_id)'}."
+        except httpx.HTTPStatusError as e:
+            error_msg = f"EmailSenderExternalMCPTool: HTTP error submitting task to MCP: {e.response.status_code} - {e.response.text}"
+            print(error_msg)
+            return f"Error submitting task to MCP: HTTP {e.response.status_code}."
+        except httpx.RequestError as e:
+            error_msg = f"EmailSenderExternalMCPTool: Request error submitting task to MCP: {e}"
+            print(error_msg)
+            return f"Error submitting task to MCP: Could not connect or request failed ({type(e).__name__})."
+        except Exception as e:
+            error_msg = f"EmailSenderExternalMCPTool: Unexpected error: {e} ({type(e).__name__})"
+            print(error_msg)
+            return f"An unexpected error occurred: {type(e).__name__}."
 
 # Define the Langflow component
 class EmailSenderToolComponent(LCToolComponent):
-    display_name = "Email Sender Tool (Async)"
-    description = "A tool that simulates sending an email and returns a task_id. Status is delivered via callback."
-    name = "EmailSenderTool"
+    display_name = "Email Sender Tool (External MCP)"
+    description = "Submits an email sending task to an external MCP server. Status via SSE."
+    # name = "EmailSenderTool" # Let Langflow use class name or define custom registration if needed
     icon = "Mail"
+    tool_class: Type[BaseTool] = EmailSenderExternalMCPTool
 
-    inputs = [
-        MultilineInput(
-            name="content",
-            display_name="Email Content",
-            info="The full content of the email."
-        ),
-        MessageTextInput(
-            name="recipient",
-            display_name="Recipient Email",
-            info="The email address of the recipient."
-        ),
-        MessageTextInput(
-            name="callback_url",
-            display_name="Callback URL (Optional)",
-            info="If provided, status will be POSTed to this URL. Otherwise, internal handling via websockets (requires session_id).",
-            required=False,
+    inputs = LCToolComponent.get_fields_from_class(tool_class) + [
+        SecretStrInput(
+            name="mcp_server_base_url", # Consistent naming
+            display_name="MCP Server Base URL", # Removed "(Optional)" as it defaults
+            info="Base URL of the external MCP server (e.g., http://localhost:8765). If not set, uses default.",
+            required=False, # It has a default in the tool
             advanced=True,
+            value=DEFAULT_MCP_SERVER_URL
         )
     ]
 
-    def build_tool(self) -> BaseTool: # Should return BaseTool as per LCToolComponent's expectation
-        task_service = get_task_service()
-        socket_service = get_socket_service()
+    def build_tool(self, **kwargs: Any) -> BaseTool:
+        # Pop mcp_server_base_url for the tool's constructor, others are for _arun
+        mcp_url = kwargs.pop("mcp_server_base_url", DEFAULT_MCP_SERVER_URL)
+        if not mcp_url or not mcp_url.strip(): # Ensure not empty or just whitespace
+            mcp_url = DEFAULT_MCP_SERVER_URL
 
-        tool_instance = EmailSenderLangchainTool(
-            task_service=task_service,
-            socket_service=socket_service
-        )
-        return cast(BaseTool, tool_instance) # Ensure it's cast to BaseTool if there's any ambiguity with langflow.field_typing.Tool
+        # The remaining kwargs are for the _arun method, LCToolComponent handles this.
+        # We only pass constructor-specific args here.
+        # If EmailSenderExternalMCPTool had other constructor args besides mcp_server_url and standard Pydantic ones,
+        # they would be handled here.
+        return self.tool_class(mcp_server_url=mcp_url)
 
-    def _build_wrapper(self): # Minimal implementation as build_tool is primary
-        pass
 
-# To make it runnable for testing if needed
+# Standalone test block
 async def main():
-    class MockTaskService:
-        async def launch_task(self, func, *args, **kwargs):
-            # Simplified arg passing for the mock
-            _content, _recipient, _task_id, _callback_url, _session_id = args[0], args[1], args[2], args[3], args[4]
-            print(f"MockTaskService: Launching {func.__name__} for recipient '{_recipient}', task_id='{_task_id}', callback_url='{_callback_url}', session_id='{_session_id}'")
-            asyncio.create_task(func(_content, _recipient, _task_id, _callback_url, _session_id))
-            return "mock_task_instance_id"
+    # This main function is for conceptual testing of component instantiation logic.
+    # It assumes LCToolComponent.get_fields_from_class is available or mocked if run directly.
+    print("--- EmailSenderToolComponent Standalone Test ---")
 
-    class MockSocketService:
-        async def emit_message(self, to, data):
-            print(f"MockSocketService: Emitting message to {to}: {data}")
+    # Simulate Langflow instantiating the component (simplified)
+    # In a real scenario, Langflow does this and provides the UI fields.
+    # For testing `build_tool`, we can call it directly.
 
-    # Instantiate services
-    mock_task_service = MockTaskService()
-    mock_socket_service = MockSocketService()
+    # Test with default URL
+    # When Langflow calls build_tool, it passes values from UI fields.
+    # If "mcp_server_base_url" is not provided or empty, the default should be used.
+    component_default = EmailSenderToolComponent() # In Langflow, this would be its representation
 
-    # Create tool instance
-    tool = EmailSenderLangchainTool(task_service=mock_task_service, socket_service=mock_socket_service)
+    # Simulating build_tool call as Langflow would, with UI values
+    # Case 1: UI field is empty or not touched (so default applies)
+    tool_instance_default = component_default.build_tool(mcp_server_base_url="")
+    print(f"Tool with default MCP URL (from empty input): {tool_instance_default.mcp_server_url}")
+    assert tool_instance_default.mcp_server_url == DEFAULT_MCP_SERVER_URL
 
-    print("\n--- Test Case 1: Email to editor (with callback_url) ---")
-    task_id_info_1 = await tool._arun(
-        content="Hello Editor, here is the draft of the article.",
-        recipient="editor@example.com",
-        callback_url="http://localhost:8000/editor_callback",
-        session_id="user_editor_session"
-    )
-    print(f"Tool output 1: {task_id_info_1}")
+    # Case 2: UI field has a value
+    custom_url = "http://custom-mcp-server:1234"
+    tool_instance_custom = component_default.build_tool(mcp_server_base_url=custom_url)
+    print(f"Tool with custom MCP URL: {tool_instance_custom.mcp_server_url}")
+    assert tool_instance_custom.mcp_server_url == custom_url
 
-    await asyncio.sleep(2) # Allow task 1 to simulate completion
-
-    print("\n--- Test Case 2: Email to reviewer (internal callback) ---")
-    task_id_info_2 = await tool._arun(
-        content="Hi Reviewer, please take a look at this submission.",
-        recipient="reviewer@example.com",
-        callback_url=None, # Implies internal handling
-        session_id="user_reviewer_session" # Crucial for internal callback
-    )
-    print(f"Tool output 2: {task_id_info_2}")
-
-    await asyncio.sleep(3) # Allow all background tasks to complete
+    print("\nEmailSenderExternalMCPTool instance creation logic tested.")
+    print("Standalone _arun test would require a running mock MCP server and actual parameters (content, recipient).")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # To run this main effectively, LCToolComponent and its methods like get_fields_from_class
+    # would need to be available in the execution context, or mocked.
+    # This is primarily for illustrating the component's build logic.
+    # asyncio.run(main()) # Actual _arun calls are not made here.
+    print("To run main for EmailSenderToolComponent, LCToolComponent context is needed or mocks for its methods.")
+    pass
 ```

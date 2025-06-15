@@ -1,0 +1,263 @@
+{
+  "name": "SSE Async Agent Test Flow",
+  "description": "A flow to test an agent with tools interacting with an external MCP server via HTTP and SSE.",
+  "data": {
+    "nodes": [
+      {
+        "id": "ChatInput_SSE_1",
+        "data": {
+          "node": {
+            "template": {
+              "input_value": { "value": "", "type": "str", "show": true, "name": "input_value", "display_name": "Input Value" },
+              "sender": { "value": "User", "type": "str", "show": true, "name": "sender", "display_name": "Sender" },
+              "sender_name": { "value": "User", "type": "str", "show": true, "name": "sender_name", "display_name": "Sender Name" },
+              "session_id": { "value": "", "type": "str", "advanced": true, "show": true, "name": "session_id", "display_name": "Session ID" },
+              "files": { "value": [], "type": "list", "advanced": true, "show": true, "name": "files", "display_name": "Files" }
+            },
+            "display_name": "Chat Input",
+            "name": "ChatInput",
+            "description": "Input component for chat interactions.",
+            "beta": false,
+            "icon": "ChatInput",
+            "type": "ChatInput"
+          },
+          "inputs": {},
+          "outputs": [
+            { "name": "message", "id": "ChatInput_SSE_1/message", "type": "ChatMessage", "display_name": "Message", "value": "ChatInput_SSE_1/message" }
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 0, "y": 0 },
+        "width": 300,
+        "height": 318
+      },
+      {
+        "id": "OpenAIModel_SSE_1",
+        "data": {
+          "node": {
+            "template": {
+              "model_name": { "value": "gpt-4o-mini", "type": "str", "show": true, "name": "model_name", "display_name": "Model Name" },
+              "temperature": { "value": 0.1, "type": "float", "show": true, "name": "temperature", "display_name": "Temperature" },
+              "max_tokens": { "value": 4096, "type": "int", "advanced": true, "show": true, "name": "max_tokens", "display_name": "Max Tokens" },
+              "openai_api_key": { "value": null, "type": "str", "required": true, "show": true, "password": true, "name": "openai_api_key", "display_name": "OpenAI API Key", "placeholder": "sk-...", "advanced": false}
+            },
+            "display_name": "OpenAI Model",
+            "name": "OpenAIModel",
+            "description": "LLM using OpenAI API.",
+            "beta": false,
+            "icon": "OpenAI",
+            "type": "OpenAIModel"
+          },
+          "inputs": {},
+          "outputs": [
+            { "name": "output", "id": "OpenAIModel_SSE_1/output", "type": "LanguageModel", "display_name": "LanguageModel", "value": "OpenAIModel_SSE_1/output" }
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 0, "y": 350 },
+        "width": 300,
+        "height": 334
+      },
+      {
+        "id": "NewsSearchTool_SSE_1",
+        "data": {
+          "node": {
+            "template": {
+              "query": {"type": "str", "required": true, "show": true, "value": "", "name": "query", "display_name": "Search Query"},
+              "mcp_server_base_url": {"type": "str", "required": false, "show": true, "advanced": true, "value": "http://localhost:8765", "name": "mcp_server_base_url", "display_name": "MCP Server Base URL"}
+            },
+            "display_name": "News Search Tool (External MCP)",
+            "name": "NewsSearchTool",
+            "description": "Submits a news search task to an external MCP server. Results via SSE.",
+            "beta": false,
+            "icon": "FileSearch",
+            "type": "NewsSearchTool"
+          },
+          "inputs": {},
+          "outputs": [
+            { "name": "tool", "id": "NewsSearchTool_SSE_1/tool", "type": "Tool", "display_name": "Tool", "value":"NewsSearchTool_SSE_1/tool" }
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 350, "y": -100 },
+        "width": 300,
+        "height": 218
+      },
+      {
+        "id": "EmailSenderTool_SSE_1",
+        "data": {
+          "node": {
+            "template": {
+              "content": {"type": "str", "required": true, "show": true, "multiline": true, "value": "", "name": "content", "display_name": "Email Content"},
+              "recipient": {"type": "str", "required": true, "show": true, "value": "", "name": "recipient", "display_name": "Recipient Email"},
+              "mcp_server_base_url": {"type": "str", "required": false, "show": true, "advanced": true, "value": "http://localhost:8765", "name": "mcp_server_base_url", "display_name": "MCP Server Base URL"}
+            },
+            "display_name": "Email Sender Tool (External MCP)",
+            "name": "EmailSenderTool",
+            "description": "Submits an email sending task to an external MCP server. Status via SSE.",
+            "beta": false,
+            "icon": "Mail",
+            "type": "EmailSenderTool"
+          },
+          "inputs": {},
+          "outputs": [
+            { "name": "tool", "id": "EmailSenderTool_SSE_1/tool", "type": "Tool", "display_name": "Tool", "value": "EmailSenderTool_SSE_1/tool" }
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 350, "y": 150 },
+        "width": 300,
+        "height": 266
+      },
+      {
+        "id": "SSEListenerTool_1",
+        "data": {
+          "node": {
+            "template": {
+              "client_callback_id": {"type": "str", "required": true, "show": true, "value": "", "name": "client_callback_id", "display_name": "Client Callback ID"},
+              "expected_task_id": {"type": "str", "required": false, "show": true, "value": "", "name": "expected_task_id", "display_name": "Expected Task ID"},
+              "timeout_seconds": {"type": "int", "required": false, "show": true, "value": 60, "advanced": true, "name": "timeout_seconds", "display_name": "Timeout (seconds)"},
+              "mcp_server_base_url": {"type": "str", "required": false, "show": true, "advanced": true, "value": "http://localhost:8765", "name": "mcp_server_base_url", "display_name": "MCP Server Base URL"}
+            },
+            "display_name": "SSE Listener Tool (External MCP)",
+            "name": "SSEListenerTool",
+            "description": "Listens to an SSE stream from an external MCP server for task results.",
+            "beta": false,
+            "icon": "Wifi",
+            "type": "SSEListenerTool"
+          },
+          "inputs": {},
+          "outputs": [
+            { "name": "tool", "id": "SSEListenerTool_1/tool", "type": "Tool", "display_name": "Tool", "value": "SSEListenerTool_1/tool" }
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 350, "y": 450 },
+        "width": 300,
+        "height": 314
+      },
+      {
+        "id": "ToolCallingAgent_SSE_1",
+        "data": {
+          "node": {
+            "template": {
+              "llm": {"type": "LanguageModel", "required": true, "show": true, "name": "llm", "display_name": "LLM"},
+              "tools": {"type": "Tool", "required": true, "show": true, "is_list": true, "name": "tools", "display_name": "Tools"},
+              "input_value": {"type": "ChatMessage", "required": true, "show": true, "name": "input_value", "display_name": "Input"},
+              "system_prompt": {
+                "type": "str",
+                "show": true,
+                "multiline": true,
+                "value": "You are a helpful assistant that can search for news and send emails using specialized tools.\n\nWhen you use 'NewsSearchTool' or 'EmailSenderTool':\n1. These tools will submit your request to an external server and immediately return a message.\n2. This message will contain a 'server_task_id' and a 'client_callback_id'. This message is NOT the final result of the search or email action. It's only a confirmation that the task was started.\n3. Example message: \"Task [server_task_id] submitted to MCP... Use client_callback_id [client_callback_id] with SSEListenerTool for results.\"\n\nAfter you receive this confirmation message:\n4. You MUST then immediately use the 'SSEListenerTool'.\n5. Provide the 'client_callback_id' from the previous message to the 'SSEListenerTool's 'client_callback_id' input.\n6. Optionally, you can provide the 'server_task_id' from the message to the 'SSEListenerTool's 'expected_task_id' input for more specific listening.\n7. The 'SSEListenerTool' will then wait for the actual result from the external server and return it to you.\n\nOnly after 'SSEListenerTool' provides the actual data (like news articles or email status) can you use that data for other tools or to formulate your final answer.\n\nIf you need to search for news and then email it, you must follow this sequence precisely:\n1. Use 'NewsSearchTool' with the search query.\n2. You will get a message with a server_task_id and client_callback_id.\n3. Use 'SSEListenerTool' with the client_callback_id (and optionally server_task_id) from the message of NewsSearchTool.\n4. 'SSEListenerTool' will return the news articles.\n5. Use 'EmailSenderTool' with the news articles and the recipient's email.\n6. You will get another message with a new server_task_id and client_callback_id.\n7. Use 'SSEListenerTool' again with the client_callback_id (and optionally server_task_id) from the message of EmailSenderTool.\n8. 'SSEListenerTool' will return the email sending status.\n9. Formulate your final response based on this status.\n\nDo not try to use the initial confirmation messages from 'NewsSearchTool' or 'EmailSenderTool' as data for other tools. Always use 'SSEListenerTool' to get the real results.",
+                "name": "system_prompt",
+                "display_name": "System Prompt"
+              },
+              "user_prompt": { "type": "str", "show": true, "value": "{input_value}", "name": "user_prompt", "display_name": "User Prompt"},
+              "chat_history": {"type": "Data", "required": false, "show": true, "is_list": true, "advanced": true, "name": "chat_history", "display_name": "Chat History"},
+              "handle_parsing_errors": {"type": "bool", "required": false, "show": true, "value": true, "advanced": true, "name": "handle_parsing_errors", "display_name": "Handle Parsing Errors"},
+              "verbose": {"type": "bool", "required": false, "show": true, "value": true, "advanced": true, "name": "verbose", "display_name": "Verbose"},
+              "max_iterations": {"type": "int", "required": false, "show": true, "value": 15, "advanced": true, "name": "max_iterations", "display_name": "Max Iterations"}
+            },
+            "display_name": "Async SSE Agent",
+            "name": "ToolCallingAgent",
+            "description": "Agent that uses tools interacting with an external server via HTTP and SSE.",
+            "beta": true,
+            "icon": "LangChain",
+            "type": "ToolCallingAgent"
+          },
+          "inputs": {
+            "llm": {"name": "llm", "id": "OpenAIModel_SSE_1/output", "type": "LanguageModel", "value": "OpenAIModel_SSE_1/output"},
+            "tools": [
+              {"name": "tools", "id": "NewsSearchTool_SSE_1/tool", "type": "Tool", "value": "NewsSearchTool_SSE_1/tool"},
+              {"name": "tools", "id": "EmailSenderTool_SSE_1/tool", "type": "Tool", "value": "EmailSenderTool_SSE_1/tool"},
+              {"name": "tools", "id": "SSEListenerTool_1/tool", "type": "Tool", "value": "SSEListenerTool_1/tool"}
+            ],
+            "input_value": {"name": "input_value", "id": "ChatInput_SSE_1/message", "type": "ChatMessage", "value": "ChatInput_SSE_1/message"}
+          },
+          "outputs": [
+            { "name": "agent", "id": "ToolCallingAgent_SSE_1/agent", "type": "AgentExecutor", "display_name": "Agent Executor", "value": "ToolCallingAgent_SSE_1/agent"},
+            { "name": "response", "id": "ToolCallingAgent_SSE_1/response", "type": "ChatMessage", "display_name": "Response", "value": "ToolCallingAgent_SSE_1/response"}
+          ]
+        },
+        "type": "genericNode",
+        "position": { "x": 700, "y": 100 },
+        "width": 300,
+        "height": 650
+      },
+      {
+        "id": "ChatOutput_SSE_1",
+        "data": {
+          "node": {
+            "template": {
+              "input_value": { "type": "ChatMessage", "required": true, "show": true, "name": "input_value", "display_name": "Input Value"},
+              "sender": { "value": "AI", "type": "str", "show": true, "name": "sender", "display_name": "Sender" },
+              "sender_name": { "value": "Async SSE Agent", "type": "str", "show": true, "name": "sender_name", "display_name": "Sender Name" },
+              "session_id": { "value": "", "type": "str", "advanced": true, "show": true, "name": "session_id", "display_name": "Session ID" },
+              "data_triggers": { "type": "Data", "required": false, "show": true, "is_list": true, "value": "", "advanced": true, "name": "data_triggers", "display_name": "Data Triggers"}
+            },
+            "display_name": "Chat Output",
+            "name": "ChatOutput",
+            "description": "Output component for chat interactions.",
+            "beta": false,
+            "icon": "ChatOutput",
+            "type": "ChatOutput"
+          },
+          "inputs": {
+             "input_value": {"name": "input_value", "id": "ToolCallingAgent_SSE_1/response", "type": "ChatMessage", "value": "ToolCallingAgent_SSE_1/response"}
+          },
+          "outputs": []
+        },
+        "type": "genericNode",
+        "position": { "x": 1050, "y": 100 },
+        "width": 300,
+        "height": 334
+      }
+    ],
+    "edges": [
+      {
+        "source": "ChatInput_SSE_1",
+        "sourceHandle": "ChatInput_SSE_1/message",
+        "target": "ToolCallingAgent_SSE_1",
+        "targetHandle": "ToolCallingAgent_SSE_1/input_value",
+        "id": "edge_ChatInput_SSE_1_message_to_ToolCallingAgent_SSE_1_input_value"
+      },
+      {
+        "source": "OpenAIModel_SSE_1",
+        "sourceHandle": "OpenAIModel_SSE_1/output",
+        "target": "ToolCallingAgent_SSE_1",
+        "targetHandle": "ToolCallingAgent_SSE_1/llm",
+        "id": "edge_OpenAIModel_SSE_1_output_to_ToolCallingAgent_SSE_1_llm"
+      },
+      {
+        "source": "NewsSearchTool_SSE_1",
+        "sourceHandle": "NewsSearchTool_SSE_1/tool",
+        "target": "ToolCallingAgent_SSE_1",
+        "targetHandle": "ToolCallingAgent_SSE_1/tools/0",
+        "id": "edge_NewsSearchTool_SSE_1_tool_to_ToolCallingAgent_SSE_1_tools_0"
+      },
+      {
+        "source": "EmailSenderTool_SSE_1",
+        "sourceHandle": "EmailSenderTool_SSE_1/tool",
+        "target": "ToolCallingAgent_SSE_1",
+        "targetHandle": "ToolCallingAgent_SSE_1/tools/1",
+        "id": "edge_EmailSenderTool_SSE_1_tool_to_ToolCallingAgent_SSE_1_tools_1"
+      },
+      {
+        "source": "SSEListenerTool_1",
+        "sourceHandle": "SSEListenerTool_1/tool",
+        "target": "ToolCallingAgent_SSE_1",
+        "targetHandle": "ToolCallingAgent_SSE_1/tools/2",
+        "id": "edge_SSEListenerTool_1_tool_to_ToolCallingAgent_SSE_1_tools_2"
+      },
+      {
+        "source": "ToolCallingAgent_SSE_1",
+        "sourceHandle": "ToolCallingAgent_SSE_1/response",
+        "target": "ChatOutput_SSE_1",
+        "targetHandle": "ChatOutput_SSE_1/input_value",
+        "id": "edge_ToolCallingAgent_SSE_1_response_to_ChatOutput_SSE_1_input_value"
+      }
+    ],
+    "viewport": { "x": -200, "y": 150, "zoom": 0.75 }
+  }
+}
+```
